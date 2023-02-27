@@ -78,7 +78,7 @@ class RunningMetrics_CD(object):
         pre = ((tp + fn) * (tp + fp) + (tn + fp) * (tn + fn)) / (tp + fp + tn + fn) ** 2
         # kappa
         kappa = (oa - pre) / (1 - pre)
-        score_dict = {'Kappa': kappa, 'IoU': iou, 'F1': f1, 'OA': oa, 'recall': recall, 'precision': precision}
+        score_dict = {'precision': precision, 'recall': recall, 'OA': oa, 'IoU': iou, 'Kappa': kappa, 'F1': f1}
         # scores = {'Overall_Acc': acc,
         #           'Mean_IoU': mean_iu}
         # # 'Kappa': kappa}

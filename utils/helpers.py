@@ -10,7 +10,7 @@ import logging
 import os
 import torch
 import torch.backends.cudnn as cudnn
-from torch.optim.lr_scheduler import _LRScheduler
+from torchvision.utils import save_image
 
 
 def find_gpu():
@@ -22,9 +22,15 @@ def find_gpu():
         memory_info = nvmlDeviceGetMemoryInfo(handle)
         mem.append(memory_info.free)
 
-    index = np.where(np.array(mem) > 25000000000)[0]
+    index = np.where(np.array(mem) > 10000000000)[0]
     gpu_index = index[-1]
     return str(gpu_index)
+
+
+def save_images(images, path, names):
+    images = torch.chunk(images, images.shape[0])
+    for index, image in enumerate(images):
+        save_image(image, path + "stylized_" + names[index])
 
 
 def seed_torch(seed):
@@ -61,42 +67,20 @@ def get_criterion(loss_function):
     return criterion
 
 
-def get_scheduler(optimizer, args):
-    """Return a learning rate scheduler
-    Parameters:
-        optimizer          -- the optimizer of the network
-        args (option class) -- stores all the experiment flags; needs to be a subclass of BaseOptions．　
-                              opt.lr_policy is the name of learning rate policy: linear | step | plateau | cosine
-    For 'linear', we keep the same learning rate for the first <opt.niter> epochs
-    and linearly decay the rate to zero over the next <opt.niter_decay> epochs.
-    For other schedulers (step, plateau, and cosine), we use the default PyTorch schedulers.
-    See https://pytorch.org/docs/stable/optim.html for more details.
-    """
-    if args.lr_name == 'linear':
-        def lambda_rule(epoch):
-            lr_l = 1.0 - epoch / float(args.epochs + 1)
-            return lr_l
-
-        scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_rule)
-    elif args.lr_name == 'step':
-        step_size = args.epochs // 3
-        # args.lr_decay_iters
-        scheduler = lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=0.1)
-    else:
-        return NotImplementedError('learning rate policy [%s] is not implemented', args.lr_name)
-    return scheduler
-
-
-def get_logger(logdir, Note):
-    logger = logging.getLogger('ptsemseg')
+def get_logger(logdir):
+    logger = logging.getLogger(__name__)
     ts = str(datetime.datetime.now()).split('.')[0].replace(" ", "_")
     ts = ts.replace(":", "_").replace("-", "_")
-    file_path = os.path.join(logdir, 'run_{}_{}.log'.format(ts, Note))
+    file_path = os.path.join(logdir, 'run_{}.log'.format(ts))
     hdlr = logging.FileHandler(file_path)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
     hdlr.setFormatter(formatter)
     logger.addHandler(hdlr)
     logger.setLevel(logging.INFO)
+    # console = logging.StreamHandler()
+    # console.setLevel(logging.INFO)
+    # console.setFormatter(formatter)
+    # logger.addHandler(console)
     return logger
 
 
@@ -143,10 +127,3 @@ class EarlyStopping:
             self.best_score = score
             # self.save_checkpoint(score, model)
             self.counter = 0
-
-    def save_checkpoint(self, score, model):
-        '''Saves model when validation loss decrease.'''
-        if self.verbose:
-            self.trace_func(f'Validation loss decreased ({self.val_loss_min:.6f} --> {score:.6f}).  Saving model ...')
-        torch.save(model.state_dict(), self.path)
-        self.score = score

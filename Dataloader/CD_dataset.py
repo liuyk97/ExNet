@@ -2,8 +2,7 @@ import os
 import matplotlib.pyplot as plt
 import tifffile
 from torchvision.transforms import InterpolationMode
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from PIL import Image
 # from utils.load_label import color2label
