@@ -22,7 +22,7 @@ def find_gpu():
         memory_info = nvmlDeviceGetMemoryInfo(handle)
         mem.append(memory_info.free)
 
-    index = np.where(np.array(mem) > 10000000000)[0]
+    index = np.where(np.array(mem) > 5000000000)[0]
     gpu_index = index[-1]
     return str(gpu_index)
 

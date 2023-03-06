@@ -5,106 +5,6 @@ from torchvision.models._utils import IntermediateLayerGetter
 from torch.nn import functional as F
 from utils.losses import hybrid_loss, dice_loss
 
-decoder = nn.Sequential(
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(512, 256, (3, 3)),
-    nn.ReLU(),
-    nn.Upsample(scale_factor=2, mode='nearest'),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 256, (3, 3)),
-    nn.ReLU(),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 256, (3, 3)),
-    nn.ReLU(),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 256, (3, 3)),
-    nn.ReLU(),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 128, (3, 3)),
-    nn.ReLU(),
-    nn.Upsample(scale_factor=2, mode='nearest'),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(128, 128, (3, 3)),
-    nn.ReLU(),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(128, 64, (3, 3)),
-    nn.ReLU(),
-    nn.Upsample(scale_factor=2, mode='nearest'),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(64, 64, (3, 3)),
-    nn.ReLU(),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(64, 3, (3, 3)),
-)
-
-vgg = nn.Sequential(
-    nn.Conv2d(3, 3, (1, 1)),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(3, 64, (3, 3)),
-    nn.ReLU(),  # relu1-1
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(64, 64, (3, 3)),
-    nn.ReLU(),  # relu1-2
-    nn.MaxPool2d((2, 2), (2, 2), (0, 0), ceil_mode=True),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(64, 128, (3, 3)),
-    nn.ReLU(),  # relu2-1
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(128, 128, (3, 3)),
-    nn.ReLU(),  # relu2-2
-    nn.MaxPool2d((2, 2), (2, 2), (0, 0), ceil_mode=True),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(128, 256, (3, 3)),
-    nn.ReLU(),  # relu3-1
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 256, (3, 3)),
-    nn.ReLU(),  # relu3-2
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 256, (3, 3)),
-    nn.ReLU(),  # relu3-3
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 256, (3, 3)),
-    nn.ReLU(),  # relu3-4
-    nn.MaxPool2d((2, 2), (2, 2), (0, 0), ceil_mode=True),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 512, (3, 3)),
-    nn.ReLU(),  # relu4-1, this is the last layer used
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(512, 512, (3, 3)),
-    nn.ReLU(),  # relu4-2
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(512, 512, (3, 3)),
-    nn.ReLU(),  # relu4-3
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(512, 512, (3, 3)),
-    nn.ReLU(),  # relu4-4
-    nn.MaxPool2d((2, 2), (2, 2), (0, 0), ceil_mode=True),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(512, 512, (3, 3)),
-    nn.ReLU(),  # relu5-1
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(512, 512, (3, 3)),
-    nn.ReLU(),  # relu5-2
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(512, 512, (3, 3)),
-    nn.ReLU(),  # relu5-3
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(512, 512, (3, 3)),
-    nn.ReLU()  # relu5-4
-)
-
-vgg.load_state_dict(torch.load('model/vgg_normalised.pth'))
-vgg = nn.Sequential(*list(vgg.children())[:31])
-
-
-def style_transfer(vgg, decoder, content, style, alpha=1.0):
-    assert (0.0 <= alpha <= 1.0)
-    content_f = vgg(content)
-    style_f = vgg(style)
-    feat = adaptive_instance_normalization(content_f, style_f)
-    feat = feat * alpha + content_f * (1 - alpha)
-    return decoder(feat)
-
 
 def calc_mean_std(feat, eps=1e-5):
     # eps is a small value added to the variance to avoid divide-by-zero.
@@ -117,6 +17,18 @@ def calc_mean_std(feat, eps=1e-5):
     return feat_mean, feat_std
 
 
+def normalization(A, B):
+    assert (A.size()[:2] == B.size()[:2])
+    size = A.size()
+    A_mean, A_std = calc_mean_std(A)
+    B_mean, B_std = calc_mean_std(B)
+    normalized_feat_A = (A - A_mean.expand(
+        size)) / A_std.expand(size)
+    normalized_feat_B = (B - B_mean.expand(
+        size)) / B_std.expand(size)
+    return normalized_feat_A, normalized_feat_B
+
+
 def adaptive_instance_normalization(content_feat, style_feat):
     assert (content_feat.size()[:2] == style_feat.size()[:2])
     size = content_feat.size()
@@ -126,22 +38,6 @@ def adaptive_instance_normalization(content_feat, style_feat):
     normalized_feat = (content_feat - content_mean.expand(
         size)) / content_std.expand(size)
     return normalized_feat * style_std.expand(size) + style_mean.expand(size)
-
-
-def deep_fourier_trans(A, B):
-    _, _, H, W = A.shape
-    A_freq = torch.fft.rfft2(A, norm='backward')
-    B_freq = torch.fft.rfft2(B, norm='backward')
-    A_amp = torch.abs(A_freq)
-    B_amp = torch.abs(B_freq)
-    A_phase = torch.angle(A_freq)
-    B_phase = torch.angle(B_freq)
-    real = B_amp * torch.cos(A_phase)
-    imag = B_amp * torch.sin(A_phase)
-    x_recom = torch.complex(real, imag) + 1e-8
-    x_recom = torch.fft.irfft2(x_recom, s=(H, W), norm='backward') + 1e-8
-    x_recom = torch.abs(x_recom) + 1e-8
-    return x_recom
 
 
 class SegHead(nn.Sequential):
@@ -161,84 +57,38 @@ class SegHead(nn.Sequential):
         return out
 
 
-class Style_Net(nn.Module):
-    def __init__(self, g_vis=False, pred=False):
-        super(Style_Net, self).__init__()
-        self.g_vis = g_vis
-        self.pred = pred
-        enc_layers = list(vgg.children())
-        self.enc_1 = nn.Sequential(*enc_layers[:4])  # input -> relu1_1
-        self.enc_2 = nn.Sequential(*enc_layers[4:11])  # relu1_1 -> relu2_1
-        self.enc_3 = nn.Sequential(*enc_layers[11:18])  # relu2_1 -> relu3_1
-        self.enc_4 = nn.Sequential(*enc_layers[18:31])  # relu3_1 -> relu4_1
-        self.conv1 = nn.Conv2d(512, 512, 3, 1, 1)
-        self.conv2 = nn.Conv2d(512, 512, 3, 1, 1)
+class ResConvModule(nn.Module):
+    def __init__(self, in_c, out_c):
+        super(ResConvModule, self).__init__()
+        self.conv1 = nn.Conv2d(in_c, out_c, 3, 2, 1)
+        self.bn1 = nn.BatchNorm2d(out_c)
+        self.conv2 = nn.Conv2d(out_c, out_c, 3, 1, 1)
+        self.bn2 = nn.BatchNorm2d(out_c)
+        self.downsample = nn.Conv2d(in_c, out_c, 1, 2)
         self.relu = nn.ReLU()
-        self.decoder = decoder
-        self.mse_loss = nn.MSELoss()
-        self.dice_loss = dice_loss
-        self.SegHead = SegHead(1024, 2)
-        # fix the encoder
-        for name in ['enc_1', 'enc_2', 'enc_3', 'enc_4']:
-            for param in getattr(self, name).parameters():
-                param.requires_grad = False
 
-    # extract relu1_1, relu2_1, relu3_1, relu4_1 from input image
-    def encode_with_intermediate(self, input):
-        results = [input]
-        for i in range(4):
-            func = getattr(self, 'enc_{:d}'.format(i + 1))
-            results.append(func(results[-1]))
-        return results[1:]
+    def forward(self, x):
+        identity = x
 
-    # extract relu4_1 from input image
-    def encode(self, input):
-        for i in range(4):
-            input = getattr(self, 'enc_{:d}'.format(i + 1))(input)
-        return input
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
 
-    def calc_content_loss(self, input, target):
-        assert (input.size() == target.size())
-        assert (target.requires_grad is False)
-        return self.mse_loss(input, target)
+        out = self.conv2(out)
+        out = self.bn2(out)
 
-    def calc_style_loss(self, input, target):
-        assert (input.size() == target.size())
-        assert (target.requires_grad is False)
-        input_mean, input_std = calc_mean_std(input)
-        target_mean, target_std = calc_mean_std(target)
-        return self.mse_loss(input_mean, target_mean) + \
-            self.mse_loss(input_std, target_std)
+        if self.downsample is not None:
+            identity = self.downsample(x)
 
-    def forward(self, content, style, cd_lbl, alpha=1.0):
-        assert 0 <= alpha <= 1
-        input_shape = content.shape[-2:]
-        style_feats = self.encode_with_intermediate(style)
-        content_feat = self.encode(content)
-        t = adaptive_instance_normalization(content_feat, style_feats[-1])
-        t = alpha * t + (1 - alpha) * content_feat
+        out += identity
+        out = self.relu(out)
 
-        g = self.decoder(t)
-
-        g_feats = self.encode_with_intermediate(g)
-        g_cd_feats = self.conv2(self.conv1(g_feats[-1]))
-        style_cd_feats = self.conv2(self.conv1(style_feats[-1]))
-        pred = self.SegHead(torch.cat([g_cd_feats, style_cd_feats[-1]], dim=1))
-        result = F.interpolate(pred, size=input_shape, mode='bilinear', align_corners=False)
-        if not self.training:
-            return result
-        loss_cd = self.dice_loss(result, cd_lbl)
-        loss_c = self.calc_content_loss(g_feats[-1], content_feat)
-        loss_s = self.calc_style_loss(g_feats[0], style_feats[0])
-        for i in range(1, 4):
-            loss_s += self.calc_style_loss(g_feats[i], style_feats[i])
-        return loss_c, loss_s, loss_cd
+        return out
 
 
 class SiamConvModule(nn.Module):
-    def __init__(self, in_c, out_c, ins_nor=False):
+    def __init__(self, in_c, out_c):
         super(SiamConvModule, self).__init__()
-        self.ins_nor = ins_nor
         self.conv1 = nn.Conv2d(in_c, out_c, 3, 2, 1)
         self.conv2 = nn.Conv2d(out_c, out_c, 3, 1, 1)
         self.relu = nn.ReLU()
@@ -248,70 +98,152 @@ class SiamConvModule(nn.Module):
         B = self.conv1(B)
         A = self.conv2(A)
         B = self.conv2(B)
-        if self.ins_nor:
-            A = adaptive_instance_normalization(A, B)
         A = self.relu(A)
         B = self.relu(B)
         return A, B
 
 
 class FreBlock(nn.Module):
-    def __init__(self, nc):
+    def __init__(self, inc):
         super(FreBlock, self).__init__()
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(nc, nc, 1, 1, 0),
+        self.convf = nn.Sequential(
+            nn.Conv2d(inc * 2, inc * 2, 1, 1, 0),
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(nc, nc, 1, 1, 0))
+            nn.Conv2d(inc * 2, inc * 2, 1, 1, 0))
+        self.convs = nn.Sequential(
+            nn.Conv2d(inc, inc, 3, 1, 1),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Conv2d(inc, inc, 3, 1, 1))
 
     def forward(self, x):
         _, _, H, W = x.shape
         y = torch.fft.rfft2(x, norm='backward')
+        x = self.convs(x)
         y_imag = y.imag
         y_real = y.real
         y_f = torch.cat([y_real, y_imag], dim=1)
-        y = self.conv1(y_f)
+        y = self.convf(y_f)
         y_real, y_imag = torch.chunk(y, 2, dim=1)
         y = torch.complex(y_real, y_imag)
         y = torch.fft.irfft2(y, s=(H, W), norm='backward')
-        return y
+        return y + x
+
+
+class FreBlock1(nn.Module):
+    def __init__(self, inc, mode='phase'):
+        super(FreBlock1, self).__init__()
+        self.mode = mode
+        self.conv_amp = nn.Sequential(
+            nn.Conv2d(inc, inc, 1, 1, 0),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Conv2d(inc, inc, 1, 1, 0))
+        self.conv_pha = nn.Sequential(
+            nn.Conv2d(inc, inc, 1, 1, 0),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Conv2d(inc, inc, 1, 1, 0))
+        self.conv = nn.Sequential(
+            nn.Conv2d(inc * 2, inc * 2, 1, 1, 0),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Conv2d(inc * 2, inc * 2, 1, 1, 0))
+
+    def forward(self, x):
+        _, _, H, W = x.shape
+        y = torch.fft.rfft2(x, norm='backward')
+        amp = torch.abs(y)
+        phase = torch.angle(y)
+        amp = self.conv_amp(amp)
+        phase = self.conv_pha(phase)
+        real = amp * torch.cos(phase)
+        imag = amp * torch.sin(phase)
+        # y = torch.complex(real, imag)
+        # y = torch.fft.irfft2(y, s=(H, W), norm='backward')
+        # y = torch.fft.rfft2(y, norm='backward')
+        f = torch.cat([real, imag], dim=1)
+        f = self.conv(f)
+        real, imag = torch.chunk(f, 2, dim=1)
+        y = torch.complex(real, imag)
+        y = torch.fft.irfft2(y, s=(H, W), norm='backward')
+        return y + x
+
+
+class StyleNorBlock(nn.Module):
+    def __init__(self, inc):
+        super(StyleNorBlock, self).__init__()
+        self.conv_A = nn.Sequential(
+            nn.Conv2d(inc, inc, 3, 1, 1),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Conv2d(inc, inc, 3, 1, 1))
+        self.conv_B = nn.Sequential(
+            nn.Conv2d(inc, inc, 3, 1, 1),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Conv2d(inc, inc, 3, 1, 1))
+        self.conv1 = nn.Conv2d(inc, inc, 3, 1, 1)
+        self.conv2 = nn.Conv2d(inc, inc, 3, 1, 1)
+
+    def forward(self, A, B):
+        A = self.conv_A(A)
+        B = self.conv_B(B)
+        A, B = normalization(A, B)
+        A = self.conv1(A)
+        B = self.conv2(B)
+        # B = normalization(B, A)
+        # A = self.conv2(A)
+        # B = self.conv2(B)
+        return A, B
 
 
 class CD_Net(nn.Module):
     def __init__(self, ):
         super(CD_Net, self).__init__()
-        # self.resnet18 = resnet18()
-        self.ins_nor = False
-        self.fourier_trans = False
         self.conv1 = SiamConvModule(3, 64)
         self.conv2 = SiamConvModule(64, 128)
-        self.FreBlock1 = FreBlock(256)
-        self.FreBlock2 = FreBlock(256)
+
+        self.resconv1 = ResConvModule(3, 64)
+        self.resconv2 = ResConvModule(64, 128)
+
+        self.FreBlock1 = FreBlock(64)
+        self.FreBlock2 = FreBlock(128)
+
+        self.apFreBlock1 = FreBlock1(64)
+        self.apFreBlock2 = FreBlock1(128)
+
+        self.STBlock1 = StyleNorBlock(64)
+        self.STBlock2 = StyleNorBlock(128)
+
+        self.conv_cat = nn.Sequential(
+            nn.Conv2d(256, 256, 3, 1, 1),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Conv2d(256, 256, 3, 1, 1))
         self.relu = nn.ReLU()
 
-        # self.conv3 = SiamConvModule(128, 256, self.ins_nor, self.fourier_trans)
-        # self.FreBlock = FreBlock(256)
         self.SegHead = SegHead(256, 2)
-        self.mse_loss = nn.MSELoss()
 
     def forward(self, A, B, lbl=None):
-        input_shape = A.shape[-2:]
-        A, B = self.conv1(A, B)
-        A, B = self.conv2(A, B)
-        A = self.FreBlock1(A)
-        B = self.FreBlock1(B)
-        A = self.FreBlock2(A)
-        B = self.FreBlock2(B)
-        # A, B = self.conv2(A, B)
-        # A, B = self.conv3(A, B)
-        # if self.fourier_trans:
-        #     A = self.FreBlock(A, B)
-        # A, B = self.conv4(A, B)
+        b, c, h, w = A.shape
+        # A, B = self.conv1(A, B)
+        A = self.resconv1(A)
+        B = self.resconv1(B)
+        A, B = self.STBlock1(A, B)
+        # A = self.FreBlock1(A)
+        # B = self.FreBlock1(B)
+        A = self.apFreBlock1(A)
+        B = self.apFreBlock1(B)
 
-        pred = self.SegHead(torch.cat([A, B], dim=1))
-        result = F.interpolate(pred, size=input_shape, mode='bilinear', align_corners=False)
+        # A, B = self.conv2(A, B)
+        A = self.resconv2(A)
+        B = self.resconv2(B)
+        A, B = self.STBlock2(A, B)
+        # A = self.FreBlock2(A)
+        # B = self.FreBlock2(B)
+        A = self.apFreBlock2(A)
+        B = self.apFreBlock2(B)
+
+        cat = torch.cat([A, B], dim=1)
+        cat = self.conv_cat(cat)
+
+        pred = self.SegHead(cat)
+        result = F.interpolate(pred, size=[h, w], mode='bilinear', align_corners=False)
         if not self.training:
             return result
         loss_cd = dice_loss(result, lbl)
-        # loss_c = self.mse_loss(A, A_t)
-        loss_c = torch.tensor(0)
-        return loss_cd, loss_c
+        return loss_cd
