@@ -4,7 +4,7 @@ import time
 import torch
 from torchinfo import summary
 from tensorboardX import SummaryWriter
-from utils.helpers import get_logger, EarlyStopping, find_gpu, seed_torch
+from utils.helpers import get_logger, EarlyStopping, find_gpu, seed_torch, PolynomialLR
 from torch.utils.data import DataLoader
 from utils.metrics import RunningMetrics_CD
 from Dataloader.CD_dataset import LEVID_CDset, WHU_CDset, SYSU_CDset, CDD_set
@@ -12,16 +12,17 @@ import tqdm
 from model.Net import CD_Net
 from tqdm import tqdm
 
+from colorama import Fore
 # ssh -L 12580:127.0.0.1:12580 liuyikun@211.87.232.115
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='LEVIR-CD')
-parser.add_argument('--seed', type=int, default=1337)
-parser.add_argument('--lr', type=float, default=1e-2)
+parser.add_argument('--seed', type=int, default=21)
+parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--epochC', type=int, default=200)
 parser.add_argument('--start_epoch', type=int, default=0)
 parser.add_argument('--batch_size', type=int, default=8)
-parser.add_argument('--gpu_id', default='3')
+parser.add_argument('--gpu_id', default='2')
 parser.add_argument('--resume_model', default='')
 parser.add_argument('--print_interval', default=100)
 parser.add_argument('--loss_function', default='dice')
@@ -29,14 +30,14 @@ args = parser.parse_args()
 
 seed_torch(args.seed)
 
-Note = 'res+ST+apfre'
+Note = 'deconv3'
 print(Note)
 if not args.gpu_id:
     args.gpu_id = find_gpu()
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
 
-logdir = 'logs/{}/{}'.format(args.dataset, Note)
+logdir = '/data/sdu08_lyk/data/style/logs/{}/{}'.format(args.dataset, Note)
 if not os.path.exists(logdir):
     os.makedirs(logdir)
 logger = get_logger(logdir)
@@ -70,16 +71,17 @@ elif args.dataset == 'SYSU-CD':
     print("get {} images from SYSU-CD train set".format(len(train_set)))
     test_set = SYSU_CDset(mode='test')
     print("get {} images from SYSU-CD test set".format(len(test_set)))
-train_loader = DataLoader(train_set, batch_size=args.batch_size, num_workers=8, shuffle=False, pin_memory=True)
+train_loader = DataLoader(train_set, batch_size=args.batch_size, num_workers=32, shuffle=False, pin_memory=True)
 # val_loader = DataLoader(val_set, batch_size=args.batch_size, num_workers=0, shuffle=False)
-test_loader = DataLoader(test_set, batch_size=args.batch_size, num_workers=8, shuffle=False, pin_memory=True)
+test_loader = DataLoader(test_set, batch_size=args.batch_size, num_workers=32, shuffle=False, pin_memory=True)
 
 # model initialization
 print("----Model Initialization----")
 CD_Net = CD_Net().to(device)
-logger.info(summary(CD_Net, [(args.batch_size, 3, 256, 256), (args.batch_size, 3, 256, 256)]))
+logger.info(summary(CD_Net, [(args.batch_size, 3, 256, 256), (args.batch_size, 3, 256, 256)], row_settings=["var_names"], col_names=["kernel_size", "output_size", "num_params", "mult_adds"],))
 optimizer = torch.optim.SGD(CD_Net.parameters(), lr=args.lr, weight_decay=2e-4, momentum=0.9)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=10, factor=0.1)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=30, factor=0.1)
+# scheduler = PolynomialLR(optimizer, max_iter=len(train_loader) * args.epochC, gamma=0.9)
 running_metrics_val = RunningMetrics_CD()
 best = -1
 best_epoch = -1
@@ -97,19 +99,21 @@ for epoch in range(args.epochC):
     for step, data in enumerate(pbar):
         image_A = data['A'].cuda()
         image_B = data['B'].cuda()
+        label = data['L'].long().cuda()
 
         optimizer.zero_grad()
 
-        loss_cd = CD_Net(image_A, image_B)
+        loss_cd = CD_Net(image_A, image_B, label)
         loss = loss_cd
         loss.backward()
         optimizer.step()
         mean_loss = (mean_loss * step + loss.detach()) / (step + 1)
-        pbar.postfix = "loss_cd {}, mean_loss {}".format(round(loss_cd.item(), 3), round(mean_loss.item(), 3))
+        cur_lr = optimizer.param_groups[-1]['lr']
+        pbar.postfix = "loss {}, mean_loss {}, cur_lr {}".format(round(loss.item(), 3), round(mean_loss.item(), 3), cur_lr)
         if (step + 1) % args.print_interval == 0:
-            print_str = "[epoch {}/{} iter:{}] loss_cd {}, mean_loss {}".format(epoch + 1, args.epochC, step + 1, round(loss_cd.item(), 3), round(mean_loss.item(), 3))
+            print_str = "[epoch {}/{} iter:{}] loss_cd {}, mean_loss {}".format(epoch + 1, args.epochC, step + 1, round(loss.item(), 3), round(mean_loss.item(), 3))
             logger.info(print_str)
-    scheduler.step(mean_loss)
+        # scheduler.step()
 
     # evaluation
     with torch.no_grad():
@@ -142,3 +146,4 @@ for epoch in range(args.epochC):
         logger.info("Best F1: {}(epoch:{})".format(best, epoch + 1))
         time.sleep(1)
     torch.cuda.empty_cache()
+    scheduler.step(score['F1'])
