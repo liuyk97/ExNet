@@ -22,7 +22,7 @@ parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--epochC', type=int, default=200)
 parser.add_argument('--start_epoch', type=int, default=0)
 parser.add_argument('--batch_size', type=int, default=8)
-parser.add_argument('--gpu_id', default='2')
+parser.add_argument('--gpu_id', default='6')
 parser.add_argument('--resume_model', default='')
 parser.add_argument('--print_interval', default=100)
 parser.add_argument('--loss_function', default='dice')
@@ -30,7 +30,7 @@ args = parser.parse_args()
 
 seed_torch(args.seed)
 
-Note = 'deconv3'
+Note = 'spex'
 print(Note)
 if not args.gpu_id:
     args.gpu_id = find_gpu()
@@ -71,16 +71,16 @@ elif args.dataset == 'SYSU-CD':
     print("get {} images from SYSU-CD train set".format(len(train_set)))
     test_set = SYSU_CDset(mode='test')
     print("get {} images from SYSU-CD test set".format(len(test_set)))
-train_loader = DataLoader(train_set, batch_size=args.batch_size, num_workers=32, shuffle=False, pin_memory=True)
+train_loader = DataLoader(train_set, batch_size=args.batch_size, num_workers=8, shuffle=False, pin_memory=True)
 # val_loader = DataLoader(val_set, batch_size=args.batch_size, num_workers=0, shuffle=False)
-test_loader = DataLoader(test_set, batch_size=args.batch_size, num_workers=32, shuffle=False, pin_memory=True)
+test_loader = DataLoader(test_set, batch_size=args.batch_size, num_workers=8, shuffle=False, pin_memory=True)
 
 # model initialization
 print("----Model Initialization----")
 CD_Net = CD_Net().to(device)
 logger.info(summary(CD_Net, [(args.batch_size, 3, 256, 256), (args.batch_size, 3, 256, 256)], row_settings=["var_names"], col_names=["kernel_size", "output_size", "num_params", "mult_adds"],))
 optimizer = torch.optim.SGD(CD_Net.parameters(), lr=args.lr, weight_decay=2e-4, momentum=0.9)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=30, factor=0.1)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=30, factor=0.05)
 # scheduler = PolynomialLR(optimizer, max_iter=len(train_loader) * args.epochC, gamma=0.9)
 running_metrics_val = RunningMetrics_CD()
 best = -1
@@ -90,7 +90,7 @@ if args.resume_model:
     print(f'Resume model:{args.resume_model}')
 
 # training
-tqdm.write("Start Change detection!")
+tqdm.write("Start Training!")
 for epoch in range(args.epochC):
     CD_Net.train()
     mean_loss = torch.zeros(1).to(device)
@@ -143,7 +143,7 @@ for epoch in range(args.epochC):
             running_metrics_val.reset()
         print_str = "F1: {}({}) / Best F1: {}({})".format(round(score['F1'], 4), epoch + 1, round(best, 4), best_epoch)
         tqdm.write(print_str)
-        logger.info("Best F1: {}(epoch:{})".format(best, epoch + 1))
+        logger.info("Best F1: {}(epoch:{})".format(best, best_epoch))
         time.sleep(1)
     torch.cuda.empty_cache()
     scheduler.step(score['F1'])

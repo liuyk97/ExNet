@@ -6,7 +6,7 @@ from torch.autograd import Variable
 
 
 class FocalLoss(nn.Module):
-    def __init__(self, gamma=0, alpha=None, size_average=True):
+    def __init__(self, gamma=2, alpha=0.25, size_average=True):
         super(FocalLoss, self).__init__()
         self.gamma = gamma
         self.alpha = alpha
@@ -28,7 +28,7 @@ class FocalLoss(nn.Module):
             input = input.contiguous().view(-1, input.size(2))
 
         target = target.view(-1, 1)
-        logpt = F.log_softmax(input)
+        logpt = F.log_softmax(input, dim=1)
         logpt = logpt.gather(1, target)
         logpt = logpt.view(-1)
         pt = Variable(logpt.data.exp())
@@ -118,16 +118,15 @@ def jaccard_loss(logits, true, eps=1e-7):
     return (1 - jacc_loss)
 
 
-def hybrid_loss(predictions, target):
+def hybrid_loss(prediction, target):
     """Calculating the loss"""
     loss = 0
 
     # gamma=0, alpha=None --> CE
-    focal = FocalLoss(gamma=0, alpha=None)
+    focal = FocalLoss()
 
-    for prediction in predictions:
-        bce = focal(prediction, target)
-        dice = dice_loss(prediction, target)
-        loss += bce + dice
+    bce = focal(prediction, target)
+    dice = dice_loss(prediction, target)
+    loss += bce + dice
 
     return loss
