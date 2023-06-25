@@ -21,13 +21,22 @@ from argparse import ArgumentParser
 import random
 
 
+def seed_torch(seed=2333):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)  # 为了禁止hash随机化，使得实验可复现
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
+
 def BCEDiceLoss(inputs, targets):
-    # print(inputs.shape, targets.shape)
     bce = F.binary_cross_entropy(inputs, targets)
     inter = (inputs * targets).sum()
     eps = 1e-5
     dice = (2 * inter + eps) / (inputs.sum() + targets.sum() + eps)
-    # print(bce.item(), inter.item(), inputs.sum().item(), dice.item())
     return bce + 1 - dice
 
 
@@ -38,7 +47,7 @@ def BCE(inputs, targets):
 
 
 @torch.no_grad()
-def val(args, val_loader, model, epoch):
+def val(args, val_loader, model, cur_iter, epoch):
     model.eval()
 
     salEvalVal = ConfuseMatrixMeter(n_class=2)
@@ -65,7 +74,7 @@ def val(args, val_loader, model, epoch):
         target_var = torch.autograd.Variable(target).float()
 
         # run the mdoel
-        output1, output2, output3 = model(pre_img_var, post_img_var)
+        output1, output2, output3 = model(pre_img_var, post_img_var, iter + cur_iter)
         loss = BCEDiceLoss(output1, target_var) + BCEDiceLoss(output2, target_var) + BCEDiceLoss(output3, target_var)
 
         pred = torch.where(output1 > 0.5, torch.ones_like(output1), torch.zeros_like(output1)).long()
@@ -121,7 +130,7 @@ def train(args, train_loader, model, optimizer, epoch, max_batches, cur_iter=0, 
         # adjust the learning rate
         lr = adjust_learning_rate(args, optimizer, epoch, iter + cur_iter, max_batches, lr_factor=lr_factor)
 
-        if args.onGPU == True:
+        if args.onGPU:
             pre_img = pre_img.cuda()
             target = target.cuda()
             post_img = post_img.cuda()
@@ -131,7 +140,7 @@ def train(args, train_loader, model, optimizer, epoch, max_batches, cur_iter=0, 
         target_var = torch.autograd.Variable(target).float()
 
         # run the model
-        output1, output2, output3 = model(pre_img_var, post_img_var)
+        output1, output2, output3 = model(pre_img_var, post_img_var, iter + cur_iter)
         loss = BCEDiceLoss(output1, target_var) + BCEDiceLoss(output2, target_var) + BCEDiceLoss(output3, target_var)
 
         pred = torch.where(output1 > 0.5, torch.ones_like(output1), torch.zeros_like(output1)).long()
@@ -156,6 +165,9 @@ def train(args, train_loader, model, optimizer, epoch, max_batches, cur_iter=0, 
                 iter + cur_iter, max_batches * args.max_epochs, f1, lr, loss.data.item(),
                 res_time),
                   end='')
+        if epoch in [0, 50, 100, 150]:
+            model_file_name = args.savedir + '{}_model.pth'.format(cur_iter)
+            torch.save({'cur_iter': cur_iter, 'state_dict': model.state_dict()}, model_file_name)
 
         if np.mod(iter, 200) == 1:
             vis_input = make_numpy_grid(de_norm(pre_img_var[0:8]))
@@ -200,20 +212,31 @@ def trainValidateSegmentation(args):
     torch.cuda.manual_seed(SEED)
     np.random.seed(SEED)
     random.seed(SEED)
-
-    model = CD_Net()
+    torch.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
 
     args.savedir = args.savedir + '/' + args.file_root + '/' + args.note + '/'
     args.vis_dir = args.savedir + '/Vis/'
 
     if args.file_root == 'LEVIR':
         args.file_root = '/data/sdu08_lyk/data/LEVIR-CD_256x256'
+        # args.file_root = '/data2/wangyuting/lyk/LEVIR-CD'
+        # args.file_root = '/home/wangyt/rs/LEVIR-CD'
+    elif args.file_root == 'LEVIR+':
+        args.file_root = '/data/sdu08_lyk/data/LEVIR-CD+_256x256'
+        # args.file_root = '/home/wangyt/rs/LEVIR-CD+_256x256'
     elif args.file_root == 'BCDD':
         args.file_root = '/home/guan/Documents/Datasets/ChangeDetection/BCDD'
     elif args.file_root == 'SYSU':
-        args.file_root = '/home/guan/Documents/Datasets/ChangeDetection/SYSU'
+        args.file_root = '/data/sdu08_lyk/data/SYSU-CD'
     elif args.file_root == 'CDD':
-        args.file_root = '/home/guan/Documents/Datasets/ChangeDetection/CDD'
+        args.file_root = '/data/sdu08_lyk/data/CDD'
+    elif args.file_root == 'DSIFN':
+        args.file_root = '/data/sdu08_lyk/data/DSIFN_256x256'
+    elif args.file_root == 'CLCD':
+        args.file_root = '/data/sdu08_lyk/data/CLCD_256x256'
+    elif args.file_root == 'S2Looking':
+        args.file_root = '/data/sdu08_lyk/data/S2Looking_256x256'
     elif args.file_root == 'quick_start':
         args.file_root = './samples'
     else:
@@ -224,12 +247,6 @@ def trainValidateSegmentation(args):
 
     if not os.path.exists(args.vis_dir):
         os.makedirs(args.vis_dir)
-
-    if args.onGPU:
-        model = model.cuda()
-
-    total_params = sum([np.prod(p.size()) for p in model.parameters()])
-    print('Total network parameters (excluding idr): ' + str(total_params))
 
     mean = [0.406, 0.456, 0.485, 0.406, 0.456, 0.485]
     std = [0.225, 0.224, 0.229, 0.225, 0.224, 0.229]
@@ -257,11 +274,11 @@ def trainValidateSegmentation(args):
 
     trainLoader = torch.utils.data.DataLoader(
         train_data,
-        batch_size=args.batch_size, shuffle=True,
-        num_workers=args.num_workers, pin_memory=True, drop_last=True
+        batch_size=args.batch_size, shuffle=False,
+        num_workers=args.num_workers, pin_memory=True, drop_last=False
     )
 
-    val_data = myDataLoader.Dataset("val", file_root=args.file_root, transform=valDataset)
+    val_data = myDataLoader.Dataset("test", file_root=args.file_root, transform=valDataset)
     valLoader = torch.utils.data.DataLoader(
         val_data, shuffle=False,
         batch_size=args.batch_size, num_workers=args.num_workers, pin_memory=True)
@@ -285,6 +302,12 @@ def trainValidateSegmentation(args):
     cur_iter = 0
     max_F1_val = 0
 
+    model = CD_Net(args.max_steps)
+    if args.onGPU:
+        model = model.cuda()
+
+    total_params = sum([np.prod(p.size()) for p in model.parameters()])
+    print('Total network parameters (excluding idr): ' + str(total_params))
     if args.resume:
         args.resume = args.savedir + '/checkpoint.pth.tar'
         if os.path.isfile(args.resume):
@@ -316,7 +339,6 @@ def trainValidateSegmentation(args):
 
         lossTr, score_tr, lr = \
             train(args, trainLoader, model, optimizer, epoch, max_batches, cur_iter)
-        cur_iter += len(trainLoader)
 
         torch.cuda.empty_cache()
 
@@ -324,7 +346,8 @@ def trainValidateSegmentation(args):
         if epoch == 0:
             continue
 
-        lossVal, score_val = val(args, valLoader, model, epoch)
+        lossVal, score_val = val(args, valLoader, model, cur_iter, epoch)
+
         torch.cuda.empty_cache()
         logger.info("\n%d\t\t%.4f\t\t%.4f\t\t%.4f\t\t%.4f\t\t%.4f" % (epoch, score_val['Kappa'], score_val['IoU'],
                                                                       score_val['F1'], score_val['recall'],
@@ -332,6 +355,7 @@ def trainValidateSegmentation(args):
 
         torch.save({
             'epoch': epoch + 1,
+            'cur_iter': cur_iter,
             'arch': str(model),
             'state_dict': model.state_dict(),
             'optimizer': optimizer.state_dict(),
@@ -342,20 +366,22 @@ def trainValidateSegmentation(args):
             'lr': lr
         }, args.savedir + 'checkpoint.pth.tar')
 
+        cur_iter += len(trainLoader)
+
         # save the model also
         model_file_name = args.savedir + 'best_model.pth'
         if epoch % 1 == 0 and max_F1_val <= score_val['F1']:
             max_F1_val = score_val['F1']
-            torch.save(model.state_dict(), model_file_name)
+            torch.save({'cur_iter': cur_iter, 'state_dict': model.state_dict()}, model_file_name)
 
         print("Epoch " + str(epoch) + ': Details')
         print("Epoch No. %d:\tTrain Loss = %.4f\tVal Loss = %.4f\t F1(tr) = %.4f\t F1(val) = %.4f\n" \
               % (epoch, lossTr, lossVal, score_tr['F1'], score_val['F1']))
         torch.cuda.empty_cache()
     state_dict = torch.load(model_file_name)
-    model.load_state_dict(state_dict)
+    model.load_state_dict(state_dict['state_dict'])
 
-    loss_test, score_test = val(args, testLoader, model, 0)
+    loss_test, score_test = val(args, testLoader, model, state_dict['cur_iter'], 0)
     print("\nTest :\t Kappa (te) = %.4f\t IoU (te) = %.4f\t F1 (te) = %.4f\t R (te) = %.4f\t P (te) = %.4f" \
           % (score_test['Kappa'], score_test['IoU'], score_test['F1'], score_test['recall'], score_test['precision']))
     logger.info("\n%s\t\t%.4f\t\t%.4f\t\t%.4f\t\t%.4f\t\t%.4f" % ('Test', score_test['Kappa'], score_test['IoU'],
@@ -366,7 +392,7 @@ def trainValidateSegmentation(args):
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument('--file_root', default="LEVIR", help='Data directory | LEVIR | BCDD | SYSU ')
+    parser.add_argument('--file_root', default="LEVIR", help='Data directory | LEVIR | BCDD | SYSU | DSIFN ')
     parser.add_argument('--inWidth', type=int, default=256, help='Width of RGB image')
     parser.add_argument('--inHeight', type=int, default=256, help='Height of RGB image')
     parser.add_argument('--max_steps', type=int, default=40000, help='Max. number of iterations')
@@ -376,6 +402,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=5e-4, help='Initial learning rate')
     parser.add_argument('--lr_mode', default='poly', help='Learning rate policy, step or poly')
     parser.add_argument('--savedir', default='/data/sdu08_lyk/data/logs', help='Directory to save the results')
+    # parser.add_argument('--savedir', default='./logs', help='Directory to save the results')
     parser.add_argument('--resume', default=False, help='Use this checkpoint to continue training | '
                                                         './results_ep100/checkpoint.pth.tar')
     parser.add_argument('--logFile', default='trainValLog.txt',
@@ -385,11 +412,13 @@ if __name__ == '__main__':
     parser.add_argument('--weight', default='', type=str, help='pretrained weight, can be a non-strict copy')
     parser.add_argument('--ms', type=int, default=0, help='apply multi-scale training, default False')
     parser.add_argument('--GPU_ID', type=str, default='6', help='GPU ID')
-    parser.add_argument('--note', type=str, default='+cat_', help='training note')
+    parser.add_argument('--note', type=str, default='+1-', help='training note')
 
     args = parser.parse_args()
     print(args.note)
     print('Called with args:')
     print(args)
-
     trainValidateSegmentation(args)
+    print(args.note)
+
+

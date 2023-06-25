@@ -16,6 +16,8 @@ from torchvision import utils
 __all__ = ['cls_accuracy']
 
 
+
+
 def get_logger(logdir):
     logger = logging.getLogger(__name__)
     ts = str(datetime.datetime.now()).split('.')[0].replace(" ", "_")
@@ -28,6 +30,7 @@ def get_logger(logdir):
     logger.setLevel(logging.INFO)
     return logger
 
+
 def make_numpy_grid(tensor_data, pad_value=0, padding=0):
     tensor_data = tensor_data.detach()
     vis = utils.make_grid(tensor_data, pad_value=pad_value, padding=padding)
@@ -39,7 +42,6 @@ def make_numpy_grid(tensor_data, pad_value=0, padding=0):
 
 def de_norm(tensor_data):
     return tensor_data * 0.5 + 0.5
-
 
 
 def visualize_imgs(*imgs):
@@ -594,4 +596,3 @@ def tensor2np(input_image, if_normalize=True):
             image_numpy[image_numpy > 255] = 255
             image_numpy = image_numpy.astype(np.uint8)
     return image_numpy
-

@@ -3,6 +3,8 @@ import numpy
 import torch.utils.data
 import os
 
+from tifffile import tifffile
+
 
 class Dataset(torch.utils.data.Dataset):
     '''
@@ -20,6 +22,8 @@ class Dataset(torch.utils.data.Dataset):
         self.post_images = [file_root + '/' + dataset + '/B/' + x for x in self.file_list]
         self.gts = [file_root + '/' + dataset + '/label/' + x for x in self.file_list]
         self.transform = transform
+        self.file = file_root.split('/')[-1]
+        self.dataset = dataset
 
     def __len__(self):
         return len(self.pre_images)
@@ -27,9 +31,14 @@ class Dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         pre_image_name = self.pre_images[idx]
         label_name = self.gts[idx]
+
         post_image_name = self.post_images[idx]
         pre_image = cv2.imread(pre_image_name)
         label = cv2.imread(label_name, 0)
+        if self.file == 'DSIFN_256x256' and self.dataset == 'test':
+            label_name = label_name.replace('jpg', 'tif')
+            label = tifffile.imread(label_name)
+
         post_image = cv2.imread(post_image_name)
         img = numpy.concatenate((pre_image, post_image), axis=2)
         # if self.transform:
