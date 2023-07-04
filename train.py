@@ -278,7 +278,7 @@ def trainValidateSegmentation(args):
         num_workers=args.num_workers, pin_memory=True, drop_last=False
     )
 
-    val_data = myDataLoader.Dataset("test", file_root=args.file_root, transform=valDataset)
+    val_data = myDataLoader.Dataset("val", file_root=args.file_root, transform=valDataset)
     valLoader = torch.utils.data.DataLoader(
         val_data, shuffle=False,
         batch_size=args.batch_size, num_workers=args.num_workers, pin_memory=True)
